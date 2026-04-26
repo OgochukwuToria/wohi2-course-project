@@ -1,10 +1,10 @@
 const prisma = require("../lib/prisma");
 const express = require("express");
 const router = express.Router();
+const authenticate = require("../middleware/auth");
+const isOwner = require("../middleware/isOwner");
 
-//const questions = require("../data/questions");
-
-
+router.use(authenticate);
 
 function formatQuestion(question) {
   return {
@@ -13,7 +13,6 @@ function formatQuestion(question) {
     keywords: question.keywords.map((k) => k.name),
   };
 }
-
 
 // GET /questions
 // List all questions
@@ -68,6 +67,7 @@ router.post("/", async (req, res) => {
   const newPost = await prisma.question.create({
     data: {
       title, date: new Date(date), content,
+       userId: req.user.userId,
       keywords: {
         connectOrCreate: keywordsArray.map((kw) => ({
           where: { name: kw }, create: { name: kw },
@@ -88,13 +88,10 @@ router.post("/", async (req, res) => {
 
 // PUT /questions/:questionId
 // Edit a question
-router.put("/:questionId", async (req, res) => {
+  router.put("/:questionId", isOwner, async (req, res) => {
   const questionId = Number(req.params.questionId);
   const { title, date, content, keywords } = req.body;
-  const existingQuestion = await prisma.question.findUnique({ where: { id: questionId } });
-  if (!existingQuestion) {
-    return res.status(404).json({ message: "Question not found" });
-  }
+
 
   if (!title || !date || !content) {
     return res.status(400).json({ msg: "title, date and content are mandatory" });
@@ -123,17 +120,13 @@ router.put("/:questionId", async (req, res) => {
 
 // DELETE /questions/:questionId
 // Delete a question
-router.delete("/:questionId", async (req, res) => {
+router.delete("/:questionId", isOwner, async (req, res) => {
   const questionId = Number(req.params.questionId);
 
   const question = await prisma.question.findUnique({
     where: { id: questionId },
     include: { keywords: true },
   });
-
-  if (!question) {
-    return res.status(404).json({ message: "Question not found" });
-  }
 
   await prisma.question.delete({ where: { id: questionId } });
 

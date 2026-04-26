@@ -1,5 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
+const bcrypt = require("bcrypt");
 
 const seedQuestions = [
   {
@@ -9,6 +10,7 @@ const seedQuestions = [
       "HTTP is the foundation of communication on the web. It defines how clients and servers exchange data.",
     keywords: ["http", "web"],
   },
+  
   {
     title: "Understanding REST APIs",
     date: new Date("2026-03-22"),
@@ -33,6 +35,19 @@ const seedQuestions = [
 ];
 
 async function main() {
+  const hashedPassword = await bcrypt.hash("1234", 10);
+   // Create a default user
+  const user = await prisma.user.create({
+  data: {
+    email: "admin@example.com",
+    password: hashedPassword,
+    name: "Admin User",
+  },
+});
+
+  console.log("Created user:", user.email);
+
+
   await prisma.question.deleteMany();
   await prisma.keyword.deleteMany();
 
@@ -42,12 +57,14 @@ async function main() {
         title: question.title,
         date: question.date,
         content: question.content,
+        userId: user.id,
         keywords: {
           connectOrCreate: question.keywords.map((kw) => ({
             where: { name: kw },
             create: { name: kw },
           })),
         },
+      
       },
     });
   }

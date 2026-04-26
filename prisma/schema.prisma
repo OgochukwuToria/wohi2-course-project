@@ -14,16 +14,24 @@ model Question {
   content  String    @db.Text
   keywords Keyword[]
 
+  userId   Int
+  user     User @relation(fields: [userId], references: [id])
+
   @@map("questions")
 }
 
 model Keyword {
-  id    Int    @id @default(autoincrement())
-  name  String @unique @db.VarChar(100)
+  id        Int        @id @default(autoincrement())
+  name      String     @unique @db.VarChar(100)
   questions Question[]
 
   @@map("keywords")
 }
 
-
-
+model User {
+  id        Int        @id @default(autoincrement())
+  email     String     @unique @db.VarChar(255)
+  password  String     @db.VarChar(255)
+  name      String     @db.VarChar(100)
+  questions Question[]
+}
