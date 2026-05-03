@@ -26,9 +26,18 @@ router.post("/register", async (req, res) => {
   const hashedPassword = await bcrypt.hash(password, 10);
 
   // Create the user
-  const user = await prisma.user.create({
+ let user;
+
+try {
+  user = await prisma.user.create({
     data: { email, password: hashedPassword, name },
   });
+} catch (err) {
+  if (err.code === "P2002") {
+    return res.status(409).json({ error: "Email already registered" });
+  }
+  return res.status(500).json({ error: "Something went wrong" });
+}
 
   // Generate a token
   const token = jwt.sign({ userId: user.id }, SECRET, { expiresIn: "1h" });
