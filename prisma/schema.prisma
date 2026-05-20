@@ -17,7 +17,6 @@ model Question {
   imageUrl  String?  @db.VarChar(255)
   keywords  Keyword[]
 
-  likes     Like[]
   attempts  Attempt[]
 
   userId    Int
@@ -40,21 +39,7 @@ model User {
   password  String     @db.VarChar(255)
   name      String     @db.VarChar(100)
   questions Question[]
-  likes    Like[] 
   attempts Attempt[]
-}
-
-model Like {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  questionId    Int
-  question      Question     @relation(fields: [questionId], references: [id])
-
-
-  @@unique([userId, questionId])
-  @@map("likes")
 }
 
 model Attempt {
@@ -62,7 +47,6 @@ model Attempt {
   submittedAnswer String
   correct         Boolean
   createdAt       DateTime @default(now())
-
   userId          Int
   user            User @relation(fields: [userId], references: [id])
 

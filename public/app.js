@@ -171,9 +171,6 @@ async function loadQuestions(keyword = "", page = 1) {
             <span>
               <button class="btn btn-play" data-id="${q.id}">Play</button>
               <a href="#" class="read-more" data-id="${q.id}">See answer</a>
-               <button class="btn-like" data-id="${q.id}" data-liked="${q.liked}">
-              ${q.liked ? "❤️ Liked" : "🤍 Like"}
-              </button>
             </span>
             ${
               q.userId === currentUserId
@@ -237,7 +234,7 @@ async function loadQuestions(keyword = "", page = 1) {
       el.addEventListener("click", () => deleteQuestion(el.dataset.id));
     });
 
-    container.querySelectorAll(".btn-like").forEach((btn) => {
+   /* container.querySelectorAll(".btn-like").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const id = btn.dataset.id;
     const isLiked = btn.dataset.liked === "true";
@@ -258,7 +255,7 @@ async function loadQuestions(keyword = "", page = 1) {
       alert(err.message);
     }
   });
-});
+}); */
 
     container.querySelectorAll(".btn-play").forEach((el) => {
       el.addEventListener("click", () => playQuestion(el.dataset.id));

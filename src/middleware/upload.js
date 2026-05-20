@@ -1,5 +1,6 @@
 const multer = require("multer");
 const path = require("path");
+const { ValidationError } = require("../lib/errors");
 
 const storage = multer.diskStorage({
   destination: path.join(__dirname, "..", "..", "public", "uploads"),
@@ -11,9 +12,10 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) cb(null, true);
-    else cb(new Error("Only image files are allowed"));
-  },
+  if (file.mimetype.startsWith("image/")) cb(null, true);
+  else cb(new ValidationError("Only image files are allowed"));
+},
+
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 

@@ -6,13 +6,13 @@
 
 */
 -- DropForeignKey
-ALTER TABLE `_keywordtopost` DROP FOREIGN KEY `_KeywordToPost_A_fkey`;
+ALTER TABLE `_KeywordToPost` DROP FOREIGN KEY `_KeywordToPost_A_fkey`;
 
 -- DropForeignKey
-ALTER TABLE `_keywordtopost` DROP FOREIGN KEY `_KeywordToPost_B_fkey`;
+ALTER TABLE `_KeywordToPost` DROP FOREIGN KEY `_KeywordToPost_B_fkey`;
 
 -- DropTable
-DROP TABLE `_keywordtopost`;
+DROP TABLE `_KeywordToPost`;
 
 -- DropTable
 DROP TABLE `posts`;

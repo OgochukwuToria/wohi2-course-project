@@ -115,5 +115,5 @@ async function loadQuestions() {
   app.innerHTML = html;
 }
 
-// ===================== START =====================
+
 showLogin();

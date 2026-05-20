@@ -123,9 +123,8 @@ async function main() {
 
   console.log("Using user:", user.email);
 
-  // Clean old data
- // await prisma.attempt.deleteMany();
-  await prisma.like.deleteMany();
+  // 
+  await prisma.attempt.deleteMany();
   await prisma.question.deleteMany();
   await prisma.keyword.deleteMany();
 
