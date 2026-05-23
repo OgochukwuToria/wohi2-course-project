@@ -14,21 +14,17 @@ const QuestionInput = z.object({
   question: z.string().min(1),
   answer: z.string().min(1),
   keywords: z.union([z.string(),z.array(z.string())]).optional(),
+  difficulty: z.enum(["easy", "medium", "hard"]).optional(),
 });
 
 function formatQuestion(question) {
   return {
     ...question,
-   // date: question.date.toISOString().split("T")[0],
     keywords: question.keywords.map((k) => k.name),
     userName: question.user?.name || null,
-   // likeCount: question._count?.likes ?? 0,
-   // liked: question.likes ? question.likes.length > 0 : false,
     solved: question.attempts && question.attempts.length > 0,
+    difficulty: question.difficulty || null,
     user: undefined,
-   // likes: undefined,
-   // _count: undefined,
-
   };
 }
 
@@ -40,6 +36,8 @@ function parseKeywords(keywords) {
   return [];
 }
 
+
+
 // GET /questions
 // List all questions
 
@@ -48,11 +46,11 @@ router.get("/", async (req, res) => {
 const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 5));
 const skip = (page - 1) * limit;
 
-  const { keyword } = req.query;
+  const { keyword, difficulty } = req.query;
 
-  const where = keyword
-    ? { keywords: { some: { name: keyword } } }
-    : {};
+  const where = {};
+  if (keyword) where.keywords = { some: { name: keyword } };
+  if (difficulty) where.difficulty = difficulty;
 
  const [filteredQuestions, total] = await Promise.all([
     prisma.question.findMany({
@@ -87,6 +85,39 @@ const skip = (page - 1) * limit;
 });
 
 
+// GET /questions/quiz
+// Return 10 random questions
+router.get("/quiz", async (req, res) => {
+  const allIds = await prisma.question.findMany({ select: { id: true } });
+
+  // Fisher-Yates shuffle
+  const arr = allIds.map((q) => q.id);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  const selectedIds = arr.slice(0, 10);
+
+  const rows = await prisma.question.findMany({
+    where: { id: { in: selectedIds } },
+    include: {
+      keywords: true,
+      user: true,
+      attempts: {
+        where: { userId: req.user.userId, correct: true },
+        take: 1,
+      },
+    },
+  });
+
+  // Restore the shuffled order (findMany returns rows sorted by id)
+  const byId = new Map(rows.map((q) => [q.id, q]));
+  const questions = selectedIds.map((id) => byId.get(id)).filter(Boolean);
+
+  res.json({ data: questions.map(formatQuestion) });
+});
+
+
 // GET /questions/:questionId
 // Show a specific question
 router.get("/:questionId", async (req, res) => {
@@ -117,7 +148,7 @@ router.get("/:questionId", async (req, res) => {
   const data = QuestionInput.parse(req.body); // throws ZodError on failure
   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
-const { question, answer, keywords } = data;
+const { question, answer, keywords, difficulty } = data;
 
   //Correct validation
  if (!question || !answer) {
@@ -133,6 +164,7 @@ const { question, answer, keywords } = data;
       question,
       answer,
       imageUrl,
+      difficulty: difficulty || null,
       userId: req.user.userId,
       keywords: {
         connectOrCreate: keywordsArray.map((kw) => ({
@@ -159,56 +191,9 @@ req.log.info({ questionId: newQuestion.id },"Question created");
 });
 
 
-// PUT /questions/:questionId
-// Edit a question
-// router.put("/:questionId", upload.single("image"), isOwner, async (req, res) => {
-//   const questionId = Number(req.params.questionId);
-//   const { question, answer, keywords } = req.body;
-
-//   //  Correct validation
-//   if (!question || !answer) {
-//     throw new ValidationError( "question and answer are mandatory" );
-//   }
-
-//   // Handle keywords (string or array)
-//   const keywordsArray = parseKeywords(keywords);
-
-//   const data = {
-//     question,
-//     answer,
-//     keywords: {
-//       set: [],
-//       connectOrCreate: keywordsArray.map((kw) => ({
-//         where: { name: kw },
-//         create: { name: kw },
-//       })),
-//     },
-//   };
-
-//   //  Handle optional image
-//   if (req.file) {
-//     data.imageUrl = `/uploads/${req.file.filename}`;
-//   }
-
-//   const updatedQuestion = await prisma.question.update({
-//     where: { id: questionId },
-//     data,
-//     include: {
-//       keywords: true,
-//       user: true,
-//       _count: {
-//         select: { attempts: true },
-//       },
-//     },
-//   });
-
-//   res.json(formatQuestion(updatedQuestion));
-// });
-
-
 router.put("/:questionId", upload.single("image"), async (req, res) => {
   const questionId = Number(req.params.questionId);
-  const { question, answer, keywords } = req.body;
+  const { question, answer, keywords, difficulty } = req.body;
 
   const existingQuestion = await prisma.question.findUnique({
     where: { id: questionId },
@@ -231,6 +216,7 @@ router.put("/:questionId", upload.single("image"), async (req, res) => {
   const data = {
     question,
     answer,
+    difficulty: difficulty || null,
     keywords: {
       set: [],
       connectOrCreate: keywordsArray.map((kw) => ({
@@ -265,59 +251,6 @@ router.put("/:questionId", upload.single("image"), async (req, res) => {
 
 
 
-// // PUT /questions/:questionId
-// // Edit a question
-//  router.put("/:questionId", upload.single("image"), isOwner, async (req, res) => {
-//   const questionId = Number(req.params.questionId);
-//   const { title, date, content, keywords } = req.body;
-
-
-//   if (!title || !date || !content) {
-//     return res.status(400).json({ msg: "title, date and content are mandatory" });
-//   }
-
-//   //const keywordsArray = Array.isArray(keywords) ? keywords : [];
-//   const keywordsArray = parseKeywords(keywords);
-//   const data = {
-//   title,
-//   date: new Date(date),
-//   content,
-//   keywords: {
-//     set: [],
-//     connectOrCreate: keywordsArray.map((kw) => ({
-//       where: { name: kw },
-//       create: { name: kw },
-//     })),
-//   },
-// };
-
-
-// if (req.file) {
-//   data.imageUrl = `/uploads/${req.file.filename}`;
-// }
-
-// const updatedQuestion = await prisma.question.update({
-//   where: { id: questionId },
-//   data,
-//   include: {
-//     keywords: true,
-//     user: true,
-//     likes: {
-//       where: { userId: req.user.userId },
-//       take: 1,
-//     },
-//     _count: {
-//       select: { likes: true },
-//     },
-//   },
-// });
-    
-//   res.json(formatQuestion(updatedQuestion));
-// });
-
-
-
-
 // DELETE /questions/:questionId
 // Delete a question
 router.delete("/:questionId", isOwner, async (req, res) => {
@@ -337,48 +270,6 @@ router.delete("/:questionId", isOwner, async (req, res) => {
 });
 
 
-/*router.post("/:questionId/like", async (req, res) => {
-    const questionId = Number(req.params.questionId);
-
-    const question = await prisma.question.findUnique({ where: { id: questionId } });
-    if (!question) {
-        return res.status(404).json({ message: "Question not found" });
-    }
-
-    const like = await prisma.like.upsert({
-        where: { userId_questionId: { userId: req.user.userId, questionId } },
-        update: {},
-        create: { userId: req.user.userId, questionId },
-    });
-
-    const likeCount = await prisma.like.count({ where: { questionId } });
-
-    res.status(201).json({
-        id: like.id,
-        questionId,
-        liked: true,
-        likeCount,
-        createdAt: like.createdAt,
-    });
-});
-
-router.delete("/:questionId/like", async (req, res) => {
-    const questionId = Number(req.params.questionId);
-
-    const question = await prisma.question.findUnique({ where: { id: questionId } });
-    if (!question) {
-        return res.status(404).json({ message: "Question not found" });
-    }
-
-    await prisma.like.deleteMany({
-        where: { userId: req.user.userId, questionId },
-    });
-
-    const likeCount = await prisma.like.count({ where: { questionId } });
-
-    res.json({ questionId, liked: false, likeCount });
-});*/
-
 router.use((err, req, res, next) => {
     if (err instanceof multer.MulterError ||
         err?.message === "Only image files are allowed") {
@@ -386,41 +277,6 @@ router.use((err, req, res, next) => {
     }
     next(err);
 });
-
-
-
-// router.post("/:questionId/play", async (req, res) => {
-//   const questionId = Number(req.params.questionId);
-//   const { answer } = req.body;
-
-// if (!answer) {
-//   throw new ValidationError("Answer is required");
-// }
-
-//   const question = await prisma.question.findUnique({
-//     where: { id: questionId },
-//   });
-
-//   if (!question) {
-//     throw new NotFoundError( "Question not found");
-//   }
-
-//   const correct = question.answer.toLowerCase().trim() === String(answer).toLowerCase().trim();
-
-//   //Save attempt
-//   await prisma.attempt.create({
-//     data: {
-//       submittedAnswer: answer,
-//       correct,
-//       userId: req.user.userId,
-//       questionId,
-//     },
-//   });
-
-//   res.json({
-//     correct,
-//      correctAnswer: question.answer,
-//    });
 
 
 router.post("/:questionId/play", async (req, res) => {
@@ -453,7 +309,7 @@ router.post("/:questionId/play", async (req, res) => {
       },
     });
   } catch (err) {
-    // Do not fail the answer response if saving attempt has DB conflict during tests
+  
   }
 
   res.json({

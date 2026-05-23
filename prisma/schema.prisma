@@ -14,7 +14,8 @@ model Question {
   question  String   @db.Text
   answer    String   @db.Text
 
-  imageUrl  String?  @db.VarChar(255)
+  imageUrl   String?  @db.VarChar(255)
+  difficulty String?  @db.VarChar(10)
   keywords  Keyword[]
 
   attempts  Attempt[]

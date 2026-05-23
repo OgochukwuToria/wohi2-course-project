@@ -3,7 +3,11 @@ const CONFIG = {
   ROUTES: {
     LOGIN: "/api/auth/login",
     REGISTER: "/api/auth/register",
+    REGISTER_CAPTCHA: "/api/auth/register-captcha",
+    CAPTCHA: "/api/auth/captcha",
     QUESTIONS: "/api/questions",
+    QUIZ: "/api/questions/quiz",
+    LEADERBOARD: "/api/leaderboard",
   },
   FIELDS: {
     LOGIN: ["email", "password"],

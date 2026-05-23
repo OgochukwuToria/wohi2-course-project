@@ -1,3 +1,10 @@
+// Load environment variables from .env for local development
+try {
+  require("dotenv").config();
+} catch (e) {
+  // ignore if dotenv isn't available in production
+}
+
 const app = require("./app");
 const logger = require("./lib/logger");
 const prisma = require("./lib/prisma");

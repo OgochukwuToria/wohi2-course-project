@@ -3,6 +3,7 @@ let isRegisterMode = false;
 let quizQuestions = [];
 let currentIndex = 0;
 let correctCount = 0;
+let currentCaptcha = null;
 
 // --- Helpers ---
 function getCurrentUserId() {
@@ -35,9 +36,55 @@ async function apiFetch(route, options = {}) {
   if (!isFormData) headers["Content-Type"] = "application/json";
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${CONFIG.API_URL}${route}`, { ...options, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || data.msg || "Request failed");
+
+  // Try to parse JSON if returned, otherwise fall back to text
+  let data = null;
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = null;
+    }
+  } else {
+    try {
+      const text = await res.text();
+      data = text ? { text } : null;
+    } catch (e) {
+      data = null;
+    }
+  }
+
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message || data.msg || data.text)) || res.statusText || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+
   return data;
+}
+
+async function loadCaptcha() {
+  try {
+    const data = await apiFetch(CONFIG.ROUTES.CAPTCHA, { method: "GET" });
+    currentCaptcha = data;
+    // Extract prompt and code if question follows '...: CODE' pattern
+    let prompt = data.question;
+    let code = null;
+    const m = data.question && data.question.match(/^(.*):\s*([A-Za-z0-9]+)\s*$/);
+    if (m) {
+      prompt = m[1].trim();
+      code = m[2].trim();
+    }
+    const promptEl = document.getElementById("captcha-prompt");
+    const codeEl = document.getElementById("captcha-code");
+    if (promptEl) promptEl.textContent = prompt;
+    if (codeEl) codeEl.textContent = code || "";
+  } catch (err) {
+    const promptEl = document.getElementById("captcha-prompt");
+    const codeEl = document.getElementById("captcha-code");
+    if (promptEl) promptEl.textContent = "Captcha unavailable. Refresh the page.";
+    if (codeEl) codeEl.textContent = "";
+  }
 }
 
 // --- Auth ---
@@ -55,6 +102,16 @@ function renderAuthForm() {
     ? 'Already have an account? <a href="#" id="switch-mode">Log in</a>'
     : 'Don\'t have an account? <a href="#" id="switch-mode">Sign up</a>';
 
+  const captchaHtml = isRegisterMode
+    ? `
+      <div id="captcha-wrapper" class="form-group">
+        <label for="captcha-answer">Verify you are human</label>
+        <div id="captcha-prompt" class="captcha-prompt" style="margin:0.25rem 0;color:var(--muted,#ddd);">Loading captcha...</div>
+        <div id="captcha-code" class="captcha-code" style="display:inline-block;padding:0.5rem 0.75rem;margin:0.25rem 0;border-radius:8px;background:#333333;color:#fff;font-weight:800;letter-spacing:2px;border:1px solid rgba(0,0,0,0.12);box-shadow:0 6px 18px rgba(0,0,0,0.2)">???</div>
+        <input type="text" id="captcha-answer" name="captchaAnswer" autocomplete="off" required />
+      </div>`
+    : "";
+
   const formHTML = `
     <h2>${title}</h2>
     <form id="auth-form">
@@ -69,6 +126,7 @@ function renderAuthForm() {
           </div>`;
         })
         .join("")}
+      ${captchaHtml}
       <button type="submit">${title}</button>
     </form>
     <p class="switch-text">${switchText}</p>
@@ -80,8 +138,13 @@ function renderAuthForm() {
   document.getElementById("switch-mode").addEventListener("click", (e) => {
     e.preventDefault();
     isRegisterMode = !isRegisterMode;
+    currentCaptcha = null;
     renderAuthForm();
   });
+
+  if (isRegisterMode) {
+    loadCaptcha();
+  }
 }
 
 async function handleAuth(e) {
@@ -90,12 +153,21 @@ async function handleAuth(e) {
   errorEl.textContent = "";
 
   const fields = isRegisterMode ? CONFIG.FIELDS.REGISTER : CONFIG.FIELDS.LOGIN;
-  const route = isRegisterMode ? CONFIG.ROUTES.REGISTER : CONFIG.ROUTES.LOGIN;
+  const route = isRegisterMode ? CONFIG.ROUTES.REGISTER_CAPTCHA : CONFIG.ROUTES.LOGIN;
 
   const body = {};
   fields.forEach((f) => {
     body[f] = document.getElementById(f).value;
   });
+
+  if (isRegisterMode) {
+    if (!currentCaptcha) {
+      errorEl.textContent = "Captcha is still loading. Please wait.";
+      return;
+    }
+    body.captchaId = currentCaptcha.id;
+    body.captchaAnswer = document.getElementById("captcha-answer").value;
+  }
 
   try {
     const data = await apiFetch(route, {
@@ -106,6 +178,9 @@ async function handleAuth(e) {
     showApp();
   } catch (err) {
     errorEl.textContent = err.message;
+    if (isRegisterMode) {
+      loadCaptcha();
+    }
   }
 }
 
@@ -117,13 +192,14 @@ async function showApp() {
   await loadQuestions();
 }
 
-async function loadQuestions(keyword = "", page = 1) {
+async function loadQuestions(keyword = "", page = 1, difficulty = "") {
   const container = document.getElementById("questions-container");
   container.innerHTML = '<p class="loading">Loading questions...</p>';
 
   try {
     const params = new URLSearchParams({ page, limit: CONFIG.QUESTIONS_PER_PAGE });
     if (keyword) params.set("keyword", keyword);
+    if (difficulty) params.set("difficulty", difficulty);
     const result = await apiFetch(`${CONFIG.ROUTES.QUESTIONS}?${params}`);
     const { data: questions, total, totalPages } = result;
     const currentUserId = getCurrentUserId();
@@ -144,10 +220,18 @@ async function loadQuestions(keyword = "", page = 1) {
       <div class="toolbar">
         <button class="btn btn-primary" id="new-question-btn">+ New Question</button>
         <button class="btn btn-primary" id="start-quiz-btn">Start Quiz</button>
+        <button class="btn btn-primary" id="generate-quiz-btn">Generate New Quiz</button>
+        <button class="btn btn-leaderboard" id="leaderboard-btn">Leaderboard</button>
         <div class="search-bar">
           <input type="text" id="keyword-input" placeholder="Search by keyword..." value="${keyword}" />
           <button class="btn btn-search" id="search-btn">Search</button>
-          ${keyword ? `<button class="btn btn-clear" id="clear-btn">Clear</button>` : ""}
+          <select id="difficulty-filter">
+            <option value="" ${!difficulty ? "selected" : ""}>All levels</option>
+            <option value="easy" ${difficulty === "easy" ? "selected" : ""}>Easy</option>
+            <option value="medium" ${difficulty === "medium" ? "selected" : ""}>Medium</option>
+            <option value="hard" ${difficulty === "hard" ? "selected" : ""}>Hard</option>
+          </select>
+          ${keyword || difficulty ? `<button class="btn btn-clear" id="clear-btn">Clear</button>` : ""}
         </div>
       </div>`;
 
@@ -161,6 +245,7 @@ async function loadQuestions(keyword = "", page = 1) {
           <h3>
             <a href="#" class="question-link" data-id="${q.id}">${q.question}</a>
             ${q[CONFIG.API_FIELDS.SOLVED] ? `<span class="badge-solved">Solved</span>` : ""}
+            ${q.difficulty ? `<span class="badge-difficulty badge-${q.difficulty}">${q.difficulty}</span>` : ""}
           </h3>
           ${
             q.keywords && q.keywords.length
@@ -201,23 +286,36 @@ async function loadQuestions(keyword = "", page = 1) {
     document.getElementById("start-quiz-btn").addEventListener("click", () => {
   startQuiz(questions);
 });
+    document.getElementById("generate-quiz-btn").addEventListener("click", loadRandomQuiz);
+    document.getElementById("leaderboard-btn").addEventListener("click", showLeaderboard);
 
     document.getElementById("search-btn").addEventListener("click", () => {
-      loadQuestions(document.getElementById("keyword-input").value.trim(), 1);
+      const kw = document.getElementById("keyword-input").value.trim();
+      const diff = document.getElementById("difficulty-filter").value;
+      loadQuestions(kw, 1, diff);
     });
 
     document.getElementById("keyword-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") loadQuestions(e.target.value.trim(), 1);
+      if (e.key === "Enter") {
+        const diff = document.getElementById("difficulty-filter").value;
+        loadQuestions(e.target.value.trim(), 1, diff);
+      }
+    });
+
+    document.getElementById("difficulty-filter").addEventListener("change", () => {
+      const kw = document.getElementById("keyword-input").value.trim();
+      const diff = document.getElementById("difficulty-filter").value;
+      loadQuestions(kw, 1, diff);
     });
 
     const clearBtn = document.getElementById("clear-btn");
     if (clearBtn) clearBtn.addEventListener("click", () => loadQuestions());
 
     const prevBtn = document.getElementById("prev-btn");
-    if (prevBtn) prevBtn.addEventListener("click", () => loadQuestions(keyword, page - 1));
+    if (prevBtn) prevBtn.addEventListener("click", () => loadQuestions(keyword, page - 1, difficulty));
 
     const nextBtn = document.getElementById("next-btn");
-    if (nextBtn) nextBtn.addEventListener("click", () => loadQuestions(keyword, page + 1));
+    if (nextBtn) nextBtn.addEventListener("click", () => loadQuestions(keyword, page + 1, difficulty));
 
     container.querySelectorAll(".question-link, .read-more").forEach((el) => {
       el.addEventListener("click", (e) => {
@@ -260,6 +358,41 @@ async function loadQuestions(keyword = "", page = 1) {
     container.querySelectorAll(".btn-play").forEach((el) => {
       el.addEventListener("click", () => playQuestion(el.dataset.id));
     });
+  } catch (err) {
+    if (err.message === "No token provided" || err.message === "Invalid or expired token") {
+      removeToken();
+      showAuth();
+      return;
+    }
+    container.innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
+async function loadRandomQuiz() {
+  const container = document.getElementById("questions-container");
+  container.innerHTML = '<p class="loading">Loading random quiz...</p>';
+
+  try {
+    const result = await apiFetch(CONFIG.ROUTES.QUIZ);
+    const questions = result.data;
+
+    if (questions.length === 0) {
+      container.innerHTML = '<p class="empty-state">No questions available for quiz.</p>';
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="question-form-wrapper" style="text-align:center">
+        <h2>Questions</h2>
+        <ol style="text-align:left;margin-bottom:1.5rem;padding-left:1.5rem">
+          ${questions.map((q) => `<li style="margin-bottom:1rem">${q.question}</li>`).join("")}
+        </ol>
+        <button class="btn btn-primary" id="begin-quiz-btn">Begin Quiz</button>
+        <button class="btn" id="cancel-quiz-btn" style="margin-left:1rem">Cancel</button>
+      </div>`;
+
+    document.getElementById("begin-quiz-btn").addEventListener("click", () => startQuiz(questions));
+    document.getElementById("cancel-quiz-btn").addEventListener("click", () => loadQuestions());
   } catch (err) {
     if (err.message === "No token provided" || err.message === "Invalid or expired token") {
       removeToken();
@@ -348,6 +481,15 @@ async function showQuestionForm(qId) {
           <input type="text" id="q-keywords" value="${q.keywords ? q.keywords.join(", ") : ""}" />
         </div>
         <div class="form-group">
+          <label for="q-difficulty">Difficulty</label>
+          <select id="q-difficulty">
+            <option value="" ${!q.difficulty ? "selected" : ""}>None</option>
+            <option value="easy" ${q.difficulty === "easy" ? "selected" : ""}>Easy</option>
+            <option value="medium" ${q.difficulty === "medium" ? "selected" : ""}>Medium</option>
+            <option value="hard" ${q.difficulty === "hard" ? "selected" : ""}>Hard</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label for="q-image">Image ${isEdit ? "(leave blank to keep current)" : "(optional)"}</label>
           <input type="file" id="q-image" accept="image/*" />
           ${isEdit && q.imageUrl ? `<img src="${q.imageUrl}" alt="" style="max-width:200px;margin-top:0.5rem;border-radius:4px" />` : ""}
@@ -371,6 +513,8 @@ async function showQuestionForm(qId) {
     body.append("question", document.getElementById("q-question").value);
     body.append("answer", document.getElementById("q-answer").value);
     body.append("keywords", document.getElementById("q-keywords").value);
+    const diff = document.getElementById("q-difficulty").value;
+    if (diff) body.append("difficulty", diff);
     const imageFile = document.getElementById("q-image").files[0];
     if (imageFile) body.append("image", imageFile);
 
@@ -485,6 +629,55 @@ if (nextBtn) {
   }
 }
 
+// --- Leaderboard ---
+async function showLeaderboard() {
+  const container = document.getElementById("questions-container");
+  container.innerHTML = '<p class="loading">Loading leaderboard...</p>';
+
+  try {
+    const data = await apiFetch(CONFIG.ROUTES.LEADERBOARD);
+
+    const medalColors = ["#ffd200", "#c0c0c0", "#cd7f32"];
+    const medalLabels = ["1st", "2nd", "3rd"];
+
+    const rows = data.map((entry) => {
+      const isMedal = entry.rank <= 3;
+      const color = isMedal ? medalColors[entry.rank - 1] : "rgba(255,255,255,0.4)";
+      const label = isMedal ? medalLabels[entry.rank - 1] : `${entry.rank}th`;
+      return `
+        <div class="lb-row ${entry.rank === 1 ? "lb-first" : ""}">
+          <div class="lb-rank" style="color:${color}">${label}</div>
+          <div class="lb-name">${entry.name}</div>
+          <div class="lb-score" style="color:${color}">${entry.correctAttempts} <span class="lb-score-label">correct</span></div>
+        </div>`;
+    }).join("");
+
+    container.innerHTML = `
+      <a href="#" id="back-btn" class="back-link">&larr; Back to questions</a>
+      <div class="leaderboard-wrapper">
+        <div class="lb-header">
+          <div class="lb-title">Leaderboard</div>
+          <div class="lb-subtitle">Top players by correct answers</div>
+        </div>
+        ${data.length === 0
+          ? `<p class="empty-state">No attempts yet. Be the first!</p>`
+          : `<div class="lb-list">${rows}</div>`}
+      </div>`;
+
+    document.getElementById("back-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      loadQuestions();
+    });
+  } catch (err) {
+    if (err.message === "No token provided" || err.message === "Invalid or expired token") {
+      removeToken();
+      showAuth();
+      return;
+    }
+    container.innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
 // --- Delete ---
 async function deleteQuestion(qId) {
   if (!confirm("Are you sure you want to delete this question?")) return;
@@ -495,6 +688,27 @@ async function deleteQuestion(qId) {
   } catch (err) {
     alert(err.message);
   }
+}
+
+function showFinalScore() {
+  const container = document.getElementById("questions-container");
+  const percentage = Math.round((correctCount / quizQuestions.length) * 100);
+
+  container.innerHTML = `
+    <div class="question-form-wrapper" style="text-align:center">
+      <h2>Quiz Completed!</h2>
+      <div style="font-size:1.5rem;margin:1.5rem 0">
+        <strong>${correctCount} out of ${quizQuestions.length}</strong> correct
+      </div>
+      <div style="font-size:1.2rem;color:var(--muted);margin-bottom:1.5rem">
+        Score: ${percentage}%
+      </div>
+      <button class="btn btn-primary" id="back-to-questions-btn">Back to Questions</button>
+    </div>`;
+
+  document.getElementById("back-to-questions-btn").addEventListener("click", () => {
+    loadQuestions();
+  });
 }
 
 function handleLogout() {
